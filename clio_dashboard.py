@@ -241,31 +241,44 @@ def load_and_process_data(file) -> Optional[pd.DataFrame]:
             if col in df.columns:
                 df[col] = df[col].map({'Yes': True, 'No': False})
         
-        # Process retainer columns (new)
-        if 'Nonrefundable Retainer' in df.columns:
-            df['Nonrefundable Retainer'] = pd.to_numeric(df['Nonrefundable Retainer'], errors='coerce')
+        # Process retainer columns - handle column names with trailing spaces and currency formatting
+        # Try both with and without trailing spaces
+        nonrefundable_col = None
+        refundable_col = None
         
-        if 'Refundable Retainer' in df.columns:
-            df['Refundable Retainer'] = pd.to_numeric(df['Refundable Retainer'], errors='coerce')
+        # Check for columns with or without trailing spaces
+        for col in df.columns:
+            if 'Nonrefundable Retainer' in col:
+                nonrefundable_col = col
+            if 'Refundable Retainer' in col:
+                refundable_col = col
+        
+        # Process Nonrefundable Retainer
+        if nonrefundable_col:
+            # Remove dollar signs and commas, then convert to numeric
+            df[nonrefundable_col] = df[nonrefundable_col].apply(lambda x: 
+                pd.to_numeric(str(x).replace('$', '').replace(',', ''), errors='coerce') if pd.notna(x) else 0)
+            df['Nonrefundable Retainer'] = df[nonrefundable_col]
+        else:
+            df['Nonrefundable Retainer'] = 0
+        
+        # Process Refundable Retainer
+        if refundable_col:
+            # Remove dollar signs and commas, then convert to numeric
+            df[refundable_col] = df[refundable_col].apply(lambda x: 
+                pd.to_numeric(str(x).replace('$', '').replace(',', ''), errors='coerce') if pd.notna(x) else 0)
+            df['Refundable Retainer'] = df[refundable_col]
+        else:
+            df['Refundable Retainer'] = 0
         
         # Calculate total value for hired matters only
         df['Total Value'] = 0
         if 'Status' in df.columns:
             hired_mask = df['Status'] == 'Hired'
-            
-            if 'Nonrefundable Retainer' in df.columns and 'Refundable Retainer' in df.columns:
-                df.loc[hired_mask, 'Total Value'] = (
-                    df.loc[hired_mask, 'Nonrefundable Retainer'].fillna(0) + 
-                    df.loc[hired_mask, 'Refundable Retainer'].fillna(0)
-                )
-            elif 'Nonrefundable Retainer' in df.columns:
-                df.loc[hired_mask, 'Total Value'] = df.loc[hired_mask, 'Nonrefundable Retainer'].fillna(0)
-            elif 'Refundable Retainer' in df.columns:
-                df.loc[hired_mask, 'Total Value'] = df.loc[hired_mask, 'Refundable Retainer'].fillna(0)
-            elif 'Value' in df.columns:
-                # Fallback to old Value column if retainer columns don't exist
-                df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
-                df.loc[hired_mask, 'Total Value'] = df.loc[hired_mask, 'Value'].fillna(0)
+            df.loc[hired_mask, 'Total Value'] = (
+                df.loc[hired_mask, 'Nonrefundable Retainer'].fillna(0) + 
+                df.loc[hired_mask, 'Refundable Retainer'].fillna(0)
+            )
         
         # Extract general practice area from Matter Type
         if 'Matter Type' in df.columns:
@@ -824,6 +837,20 @@ def main():
     
     # Sidebar filters
     st.sidebar.header("Dashboard Filters")
+    
+    # Add staff filter for the specific team members
+    target_staff = [
+        'Llewelyn Abrahams',
+        'Briana Markland',
+        'Meylin Lainez',
+        'Fabio Varens Ojeda',
+        'Camila Mosquera'
+    ]
+    
+    # Filter dataframe to only include target staff by default
+    if 'Created By' in df.columns:
+        df = df[df['Created By'].isin(target_staff)]
+        st.sidebar.info(f"Showing data for: {', '.join(target_staff)}")
     
     # Date range filter
     if 'Created' in df.columns:
