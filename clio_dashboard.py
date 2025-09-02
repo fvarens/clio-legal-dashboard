@@ -16,6 +16,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import io
 from typing import Optional, Dict, Any, Tuple
+import re
 
 # Page configuration
 st.set_page_config(
@@ -66,6 +67,150 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def extract_practice_area(matter_type):
+    """
+    Extract the general practice area from the full matter type string.
+    
+    Args:
+        matter_type: Full matter type string (e.g., "Family Law - Divorce")
+    
+    Returns:
+        General practice area (e.g., "Family Law")
+    """
+    if pd.isna(matter_type):
+        return "Unknown"
+    
+    # Split by hyphen and take the first part, then clean it
+    general_area = str(matter_type).split('-')[0].strip()
+    
+    # Normalize common variations
+    area_mapping = {
+        'family law': 'Family Law',
+        'criminal': 'Criminal Law',
+        'real estate': 'Real Estate Law',
+        'civil': 'Civil Law',
+        'estate & probate': 'Estate & Probate Law',
+        'estate and probate': 'Estate & Probate Law',
+        'probate': 'Estate & Probate Law'
+    }
+    
+    # Check if the general area matches any known categories
+    general_area_lower = general_area.lower()
+    for key, value in area_mapping.items():
+        if key in general_area_lower:
+            return value
+    
+    return general_area
+
+def create_geographic_map(df: pd.DataFrame):
+    """
+    Create an interactive map visualization showing leads and conversions by location.
+    """
+    # Prepare data for mapping
+    if 'Primary Contact State' not in df.columns:
+        st.warning("Geographic data not available for mapping")
+        return
+    
+    # Aggregate data by state
+    state_data = df.groupby('Primary Contact State').agg({
+        'Status': ['count', lambda x: (x == 'Hired').sum()],
+        'Total Value': 'sum'
+    }).round(0)
+    state_data.columns = ['Total Leads', 'Conversions', 'Revenue']
+    state_data['Conversion Rate'] = (state_data['Conversions'] / state_data['Total Leads'] * 100).round(1)
+    state_data = state_data.reset_index()
+    
+    # Map state abbreviations to full names for Plotly
+    state_codes = {
+        'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas', 'CA': 'California',
+        'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware', 'FL': 'Florida', 'GA': 'Georgia',
+        'HI': 'Hawaii', 'ID': 'Idaho', 'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa',
+        'KS': 'Kansas', 'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+        'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi', 'MO': 'Missouri',
+        'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada', 'NH': 'New Hampshire', 'NJ': 'New Jersey',
+        'NM': 'New Mexico', 'NY': 'New York', 'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio',
+        'OK': 'Oklahoma', 'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+        'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah', 'VT': 'Vermont',
+        'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia', 'WI': 'Wisconsin', 'WY': 'Wyoming'
+    }
+    
+    # Try to match state codes
+    state_data['state_name'] = state_data['Primary Contact State'].map(state_codes)
+    state_data['state_abbr'] = state_data['Primary Contact State']
+    
+    # Create choropleth map
+    fig_map = px.choropleth(
+        state_data,
+        locations='state_abbr',
+        locationmode='USA-states',
+        color='Conversion Rate',
+        hover_name='Primary Contact State',
+        hover_data={
+            'Total Leads': True,
+            'Conversions': True,
+            'Revenue': ':$,.0f',
+            'Conversion Rate': ':.1f%',
+            'state_abbr': False
+        },
+        color_continuous_scale='Viridis',
+        labels={'Conversion Rate': 'Conversion Rate (%)'},
+        title='Lead Conversion Rate by State'
+    )
+    
+    fig_map.update_geos(scope="usa")
+    fig_map.update_layout(
+        height=600,
+        geo=dict(
+            bgcolor='rgba(0,0,0,0)',
+            lakecolor='rgb(255, 255, 255)',
+        )
+    )
+    
+    return fig_map
+
+def create_city_bubble_map(df: pd.DataFrame):
+    """
+    Create a bubble map showing cities with lead counts and conversion metrics.
+    """
+    if 'Primary Contact City' not in df.columns or 'Primary Contact State' not in df.columns:
+        return None
+    
+    # Aggregate by city and state
+    city_data = df.groupby(['Primary Contact City', 'Primary Contact State']).agg({
+        'Status': ['count', lambda x: (x == 'Hired').sum()],
+        'Total Value': 'sum'
+    }).round(0)
+    city_data.columns = ['Total Leads', 'Conversions', 'Revenue']
+    city_data['Conversion Rate'] = (city_data['Conversions'] / city_data['Total Leads'] * 100).round(1)
+    city_data = city_data.reset_index()
+    
+    # Filter top cities
+    top_cities = city_data.nlargest(20, 'Total Leads')
+    
+    # Create bubble chart
+    fig_bubble = px.scatter(
+        top_cities,
+        x='Total Leads',
+        y='Conversion Rate',
+        size='Revenue',
+        color='Conversions',
+        hover_name='Primary Contact City',
+        hover_data={
+            'Primary Contact State': True,
+            'Revenue': ':$,.0f'
+        },
+        title='Top 20 Cities: Lead Volume vs Conversion Rate',
+        labels={
+            'Total Leads': 'Total Lead Count',
+            'Conversion Rate': 'Conversion Rate (%)'
+        },
+        color_continuous_scale='RdYlGn'
+    )
+    
+    fig_bubble.update_layout(height=500)
+    
+    return fig_bubble
+
 @st.cache_data(ttl=300)
 def load_and_process_data(file) -> Optional[pd.DataFrame]:
     """
@@ -96,10 +241,37 @@ def load_and_process_data(file) -> Optional[pd.DataFrame]:
             if col in df.columns:
                 df[col] = df[col].map({'Yes': True, 'No': False})
         
-        # Clean numeric columns
-        if 'Value' in df.columns:
-            df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+        # Process retainer columns (new)
+        if 'Nonrefundable Retainer' in df.columns:
+            df['Nonrefundable Retainer'] = pd.to_numeric(df['Nonrefundable Retainer'], errors='coerce')
         
+        if 'Refundable Retainer' in df.columns:
+            df['Refundable Retainer'] = pd.to_numeric(df['Refundable Retainer'], errors='coerce')
+        
+        # Calculate total value for hired matters only
+        df['Total Value'] = 0
+        if 'Status' in df.columns:
+            hired_mask = df['Status'] == 'Hired'
+            
+            if 'Nonrefundable Retainer' in df.columns and 'Refundable Retainer' in df.columns:
+                df.loc[hired_mask, 'Total Value'] = (
+                    df.loc[hired_mask, 'Nonrefundable Retainer'].fillna(0) + 
+                    df.loc[hired_mask, 'Refundable Retainer'].fillna(0)
+                )
+            elif 'Nonrefundable Retainer' in df.columns:
+                df.loc[hired_mask, 'Total Value'] = df.loc[hired_mask, 'Nonrefundable Retainer'].fillna(0)
+            elif 'Refundable Retainer' in df.columns:
+                df.loc[hired_mask, 'Total Value'] = df.loc[hired_mask, 'Refundable Retainer'].fillna(0)
+            elif 'Value' in df.columns:
+                # Fallback to old Value column if retainer columns don't exist
+                df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+                df.loc[hired_mask, 'Total Value'] = df.loc[hired_mask, 'Value'].fillna(0)
+        
+        # Extract general practice area from Matter Type
+        if 'Matter Type' in df.columns:
+            df['Practice Area'] = df['Matter Type'].apply(extract_practice_area)
+        
+        # Clean numeric columns for zip codes
         if 'Primary Contact Zip' in df.columns:
             df['Primary Contact Zip'] = pd.to_numeric(df['Primary Contact Zip'], errors='coerce')
         
@@ -214,8 +386,8 @@ def create_kpi_cards(df: pd.DataFrame):
     total_leads = len(df)
     hired_count = len(df[df['Status'] == 'Hired']) if 'Status' in df.columns else 0
     conversion_rate = (hired_count / total_leads * 100) if total_leads > 0 else 0
-    total_value = df['Value'].sum() if 'Value' in df.columns else 0
-    avg_value = df['Value'].mean() if 'Value' in df.columns and len(df) > 0 else 0
+    total_value = df['Total Value'].sum() if 'Total Value' in df.columns else 0
+    avg_value = df['Total Value'].mean() if 'Total Value' in df.columns and len(df) > 0 else 0
     
     with col1:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
@@ -260,8 +432,8 @@ def create_kpi_cards_with_context(df: pd.DataFrame):
     total_leads = len(df)
     hired_count = len(df[df['Status'] == 'Hired']) if 'Status' in df.columns else 0
     conversion_rate = (hired_count / total_leads * 100) if total_leads > 0 else 0
-    total_value = df['Value'].sum() if 'Value' in df.columns else 0
-    avg_value = df['Value'].mean() if 'Value' in df.columns and len(df) > 0 else 0
+    total_value = df['Total Value'].sum() if 'Total Value' in df.columns else 0
+    avg_value = df['Total Value'].mean() if 'Total Value' in df.columns and len(df) > 0 else 0
     
     # Calculate benchmarks (industry standards for legal practices)
     conversion_benchmark = 25.0  # Industry average conversion rate
@@ -307,14 +479,72 @@ def create_kpi_cards_with_context(df: pd.DataFrame):
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
+def create_kpi_cards_with_retainers(df: pd.DataFrame):
+    """Create KPI metric cards including retainer information."""
+    col1, col2, col3, col4 = st.columns(4)
+    
+    total_leads = len(df)
+    hired_count = len(df[df['Status'] == 'Hired']) if 'Status' in df.columns else 0
+    conversion_rate = (hired_count / total_leads * 100) if total_leads > 0 else 0
+    
+    # Calculate retainer values for hired matters only
+    if 'Status' in df.columns:
+        hired_df = df[df['Status'] == 'Hired']
+        nonrefundable_total = hired_df['Nonrefundable Retainer'].sum() if 'Nonrefundable Retainer' in hired_df.columns else 0
+        refundable_total = hired_df['Refundable Retainer'].sum() if 'Refundable Retainer' in hired_df.columns else 0
+        total_revenue = hired_df['Total Value'].sum() if 'Total Value' in hired_df.columns else 0
+        avg_revenue = total_revenue / hired_count if hired_count > 0 else 0
+    else:
+        nonrefundable_total = refundable_total = total_revenue = avg_revenue = 0
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Total Leads",
+            value=f"{total_leads:,}",
+            delta=None,
+            help="Total number of leads in selected period"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Conversion Rate",
+            value=f"{conversion_rate:.1f}%",
+            delta=None,
+            help="Percentage of leads that converted to hired clients"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Total Revenue",
+            value=f"${total_revenue:,.0f}",
+            delta=f"NR: ${nonrefundable_total:,.0f}",
+            help=f"Nonrefundable: ${nonrefundable_total:,.0f} | Refundable: ${refundable_total:,.0f}"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        st.metric(
+            label="Avg Revenue/Hire",
+            value=f"${avg_revenue:,.0f}",
+            delta=None,
+            help="Average revenue per hired client"
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+
 def generate_executive_summary(df: pd.DataFrame):
     """Generate and display an executive summary report."""
     # Calculate key metrics
     total_leads = len(df)
     hired_count = len(df[df['Status'] == 'Hired']) if 'Status' in df.columns else 0
     conversion_rate = (hired_count / total_leads * 100) if total_leads > 0 else 0
-    total_value = df['Value'].sum() if 'Value' in df.columns else 0
-    avg_value = df['Value'].mean() if 'Value' in df.columns and len(df) > 0 else 0
+    total_value = df['Total Value'].sum() if 'Total Value' in df.columns else 0
+    avg_value = df['Total Value'].mean() if 'Total Value' in df.columns and len(df) > 0 else 0
     
     # Top performing matter type
     if 'Matter Type' in df.columns and 'Status' in df.columns:
@@ -698,18 +928,15 @@ def show_overview_page(df: pd.DataFrame):
     if st.button("📄 Generate Executive Summary"):
         generate_executive_summary(df)
     
-    # KPI Cards with context
-    create_kpi_cards_with_context(df)
+    # KPI Cards with retainer information
+    create_kpi_cards_with_retainers(df)
     
-    # Status breakdown
+    # Status breakdown and Practice Area distribution
     col1, col2 = st.columns(2)
     
     with col1:
         if 'Status' in df.columns:
             status_counts = df['Status'].value_counts()
-            # Calculate percentages for better context
-            total = status_counts.sum()
-            percentages = (status_counts / total * 100).round(1)
             
             fig_pie = px.pie(
                 values=status_counts.values,
@@ -717,7 +944,6 @@ def show_overview_page(df: pd.DataFrame):
                 title="Matter Status Distribution",
                 color_discrete_sequence=px.colors.qualitative.Set3
             )
-            # Clean hover template
             fig_pie.update_traces(
                 hovertemplate="<b>%{label}</b><br>" +
                              "Count: %{value}<br>" +
@@ -732,17 +958,16 @@ def show_overview_page(df: pd.DataFrame):
             st.plotly_chart(fig_pie, use_container_width=True)
     
     with col2:
-        if 'Matter Type' in df.columns:
-            matter_type_counts = df['Matter Type'].value_counts().head(10)
+        if 'Practice Area' in df.columns:
+            practice_counts = df['Practice Area'].value_counts()
             fig_bar = px.bar(
-                x=matter_type_counts.values,
-                y=matter_type_counts.index,
+                x=practice_counts.values,
+                y=practice_counts.index,
                 orientation='h',
-                title="Top 10 Matter Types",
-                color=matter_type_counts.values,
+                title="Leads by Practice Area",
+                color=practice_counts.values,
                 color_continuous_scale='Blues'
             )
-            # Clean hover template
             fig_bar.update_traces(
                 hovertemplate="<b>%{y}</b><br>" +
                              "Count: %{x}<br>" +
@@ -756,12 +981,66 @@ def show_overview_page(df: pd.DataFrame):
             )
             st.plotly_chart(fig_bar, use_container_width=True)
     
+    # Retainer Analysis Section
+    st.subheader("💰 Retainer Analysis")
+    if 'Nonrefundable Retainer' in df.columns or 'Refundable Retainer' in df.columns:
+        hired_df = df[df['Status'] == 'Hired'] if 'Status' in df.columns else df
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Retainer type comparison
+            retainer_data = {
+                'Type': ['Nonrefundable', 'Refundable'],
+                'Total': [
+                    hired_df['Nonrefundable Retainer'].sum() if 'Nonrefundable Retainer' in hired_df.columns else 0,
+                    hired_df['Refundable Retainer'].sum() if 'Refundable Retainer' in hired_df.columns else 0
+                ]
+            }
+            
+            fig_retainer = px.bar(
+                retainer_data,
+                x='Type',
+                y='Total',
+                title='Retainer Revenue Breakdown',
+                color='Type',
+                color_discrete_map={'Nonrefundable': COLORS['success'], 'Refundable': COLORS['accent']}
+            )
+            fig_retainer.update_traces(
+                hovertemplate="<b>%{x}</b><br>" +
+                             "Total: $%{y:,.0f}<br>" +
+                             "<extra></extra>"
+            )
+            st.plotly_chart(fig_retainer, use_container_width=True)
+        
+        with col2:
+            # Average retainer by practice area
+            if 'Practice Area' in hired_df.columns:
+                retainer_by_area = hired_df.groupby('Practice Area').agg({
+                    'Nonrefundable Retainer': 'mean',
+                    'Refundable Retainer': 'mean',
+                    'Total Value': 'mean'
+                }).round(0)
+                
+                retainer_by_area = retainer_by_area.sort_values('Total Value', ascending=False).head(5)
+                
+                # Format for display
+                display_retainer = retainer_by_area.copy()
+                for col in display_retainer.columns:
+                    display_retainer[col] = display_retainer[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
+                
+                st.subheader("Top 5 Practice Areas by Avg Revenue")
+                st.dataframe(display_retainer, use_container_width=True)
+    
     # Recent activity table with better formatting
     st.subheader("Recent Matters")
     if 'Created' in df.columns:
-        recent_df = df.nlargest(10, 'Created')[['Created', 'Matter Type', 'Status', 'Primary Contact', 'Value']].copy()
-        if 'Value' in recent_df.columns:
-            recent_df['Value'] = recent_df['Value'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
+        columns_to_show = ['Created', 'Practice Area', 'Status', 'Primary Contact', 'Total Value']
+        available_columns = [col for col in columns_to_show if col in df.columns]
+        
+        recent_df = df.nlargest(10, 'Created')[available_columns].copy()
+        if 'Total Value' in recent_df.columns:
+            recent_df['Total Value'] = recent_df['Total Value'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
         if 'Created' in recent_df.columns:
             recent_df['Created'] = recent_df['Created'].dt.strftime('%Y-%m-%d')
         st.dataframe(recent_df, use_container_width=True)
@@ -996,130 +1275,279 @@ def show_engagement_metrics_page(df: pd.DataFrame):
         st.plotly_chart(fig_corr, use_container_width=True)
 
 def show_geographic_analysis_page(df: pd.DataFrame):
-    """Display geographic analysis."""
+    """Display enhanced geographic analysis with interactive maps."""
     st.header("🗺️ Geographic Analysis")
     
     if 'Primary Contact State' not in df.columns:
         st.warning("Geographic data not available")
         return
     
-    col1, col2 = st.columns(2)
+    # Create tabs for different geographic views
+    tab1, tab2, tab3 = st.tabs(["State Map", "City Analysis", "Regional Metrics"])
     
-    with col1:
-        # Leads by state
-        state_counts = df['Primary Contact State'].value_counts().head(15)
-        fig_states = px.bar(
-            x=state_counts.values,
-            y=state_counts.index,
-            orientation='h',
-            title="Top 15 States by Lead Count",
-            color=state_counts.values,
-            color_continuous_scale='Blues'
-        )
-        fig_states.update_layout(
-            yaxis={'categoryorder':'total ascending'},
-            showlegend=False,
-            height=500
-        )
-        st.plotly_chart(fig_states, use_container_width=True)
-    
-    with col2:
-        # Top cities
-        if 'Primary Contact City' in df.columns:
-            city_counts = df['Primary Contact City'].value_counts().head(15)
-            fig_cities = px.bar(
-                x=city_counts.values,
-                y=city_counts.index,
-                orientation='h',
-                title="Top 15 Cities by Lead Count",
-                color=city_counts.values,
-                color_continuous_scale='Greens'
-            )
-            fig_cities.update_layout(
-                yaxis={'categoryorder':'total ascending'},
-                showlegend=False,
-                height=500
-            )
-            st.plotly_chart(fig_cities, use_container_width=True)
-    
-    # Geographic conversion analysis
-    if 'Status' in df.columns and 'Value' in df.columns:
-        geo_performance = df.groupby('Primary Contact State').agg({
-            'Status': ['count', lambda x: (x == 'Hired').sum()],
-            'Value': 'sum'
-        }).round(0)
-        geo_performance.columns = ['Total Leads', 'Hired', 'Total Value']
-        geo_performance['Conversion Rate %'] = (geo_performance['Hired'] / geo_performance['Total Leads'] * 100).round(1)
-        geo_performance = geo_performance.sort_values('Total Value', ascending=False).head(10)
+    with tab1:
+        # Interactive state map
+        st.subheader("Lead Conversion Rate by State")
+        fig_map = create_geographic_map(df)
+        if fig_map:
+            st.plotly_chart(fig_map, use_container_width=True)
         
-        st.subheader("Top 10 States by Performance")
-        st.dataframe(geo_performance, use_container_width=True)
+        # State performance table
+        state_metrics = df.groupby('Primary Contact State').agg({
+            'Status': ['count', lambda x: (x == 'Hired').sum()],
+            'Total Value': 'sum'
+        }).round(0)
+        state_metrics.columns = ['Total Leads', 'Conversions', 'Revenue']
+        state_metrics['Conversion Rate %'] = (state_metrics['Conversions'] / state_metrics['Total Leads'] * 100).round(1)
+        state_metrics = state_metrics.sort_values('Revenue', ascending=False).head(10)
+        
+        # Format for display
+        display_metrics = state_metrics.copy()
+        display_metrics['Revenue'] = display_metrics['Revenue'].apply(lambda x: f"${x:,.0f}")
+        
+        st.subheader("Top 10 States by Revenue")
+        st.dataframe(display_metrics, use_container_width=True)
+    
+    with tab2:
+        # City bubble map
+        st.subheader("City Performance Analysis")
+        fig_bubble = create_city_bubble_map(df)
+        if fig_bubble:
+            st.plotly_chart(fig_bubble, use_container_width=True)
+        
+        # Top cities table
+        if 'Primary Contact City' in df.columns:
+            city_performance = df.groupby(['Primary Contact City', 'Primary Contact State']).agg({
+                'Status': ['count', lambda x: (x == 'Hired').sum()],
+                'Total Value': 'sum'
+            }).round(0)
+            city_performance.columns = ['Total Leads', 'Conversions', 'Revenue']
+            city_performance['Conversion Rate %'] = (city_performance['Conversions'] / city_performance['Total Leads'] * 100).round(1)
+            city_performance = city_performance.sort_values('Revenue', ascending=False).head(15)
+            
+            # Format for display
+            display_city = city_performance.copy()
+            display_city['Revenue'] = display_city['Revenue'].apply(lambda x: f"${x:,.0f}")
+            
+            st.subheader("Top 15 Cities by Revenue")
+            st.dataframe(display_city, use_container_width=True)
+    
+    with tab3:
+        # Regional analysis
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Create regions based on states
+            def get_region(state):
+                northeast = ['CT', 'ME', 'MA', 'NH', 'RI', 'VT', 'NJ', 'NY', 'PA']
+                midwest = ['IL', 'IN', 'MI', 'OH', 'WI', 'IA', 'KS', 'MN', 'MO', 'NE', 'ND', 'SD']
+                south = ['DE', 'FL', 'GA', 'MD', 'NC', 'SC', 'VA', 'DC', 'WV', 'AL', 'KY', 'MS', 'TN', 'AR', 'LA', 'OK', 'TX']
+                west = ['AZ', 'CO', 'ID', 'MT', 'NV', 'NM', 'UT', 'WY', 'AK', 'CA', 'HI', 'OR', 'WA']
+                
+                if state in northeast:
+                    return 'Northeast'
+                elif state in midwest:
+                    return 'Midwest'
+                elif state in south:
+                    return 'South'
+                elif state in west:
+                    return 'West'
+                else:
+                    return 'Other'
+            
+            df['Region'] = df['Primary Contact State'].apply(get_region)
+            
+            region_metrics = df.groupby('Region').agg({
+                'Status': ['count', lambda x: (x == 'Hired').sum()],
+                'Total Value': 'sum'
+            }).round(0)
+            region_metrics.columns = ['Total Leads', 'Conversions', 'Revenue']
+            region_metrics['Conversion Rate %'] = (region_metrics['Conversions'] / region_metrics['Total Leads'] * 100).round(1)
+            
+            fig_region = px.bar(
+                region_metrics.reset_index(),
+                x='Region',
+                y='Revenue',
+                title='Revenue by Region',
+                color='Conversion Rate %',
+                color_continuous_scale='Viridis'
+            )
+            fig_region.update_traces(
+                hovertemplate="<b>%{x}</b><br>" +
+                             "Revenue: $%{y:,.0f}<br>" +
+                             "Conversion Rate: %{color:.1f}%<br>" +
+                             "<extra></extra>"
+            )
+            st.plotly_chart(fig_region, use_container_width=True)
+        
+        with col2:
+            # Heatmap of conversions by state and practice area
+            if 'Practice Area' in df.columns:
+                state_practice = pd.crosstab(
+                    df['Primary Contact State'], 
+                    df['Practice Area'], 
+                    df['Status'] == 'Hired', 
+                    aggfunc='sum'
+                )
+                
+                # Get top 10 states and top 5 practice areas
+                top_states = df['Primary Contact State'].value_counts().head(10).index
+                top_practices = df['Practice Area'].value_counts().head(5).index
+                
+                state_practice_filtered = state_practice.loc[
+                    state_practice.index.isin(top_states),
+                    state_practice.columns.isin(top_practices)
+                ]
+                
+                fig_heatmap = px.imshow(
+                    state_practice_filtered,
+                    title='Conversions: State vs Practice Area',
+                    color_continuous_scale='YlOrRd',
+                    aspect='auto',
+                    text_auto=True
+                )
+                fig_heatmap.update_traces(
+                    hovertemplate="<b>State:</b> %{y}<br>" +
+                                 "<b>Practice Area:</b> %{x}<br>" +
+                                 "<b>Conversions:</b> %{z}<br>" +
+                                 "<extra></extra>"
+                )
+                st.plotly_chart(fig_heatmap, use_container_width=True)
 
 def show_financial_dashboard_page(df: pd.DataFrame):
-    """Display financial analysis dashboard."""
+    """Display financial analysis dashboard with retainer breakdown."""
     st.header("💰 Financial Dashboard")
     
-    if 'Value' not in df.columns:
+    if 'Total Value' not in df.columns:
         st.warning("Financial data not available")
         return
     
     # Filter for hired matters only for revenue analysis
-    hired_df = df[df['Status'] == 'Hired'] if 'Status' in df.columns else df[df['Value'].notna()]
+    hired_df = df[df['Status'] == 'Hired'] if 'Status' in df.columns else df[df['Total Value'].notna()]
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Cumulative value over time
-        if 'Created' in hired_df.columns and len(hired_df) > 0:
-            daily_value = hired_df.groupby(hired_df['Created'].dt.date)['Value'].sum().cumsum()
+    # Retainer breakdown over time
+    if 'Created' in hired_df.columns and len(hired_df) > 0:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Cumulative revenue over time
+            daily_revenue = hired_df.groupby(hired_df['Created'].dt.date).agg({
+                'Total Value': 'sum',
+                'Nonrefundable Retainer': 'sum',
+                'Refundable Retainer': 'sum'
+            }).fillna(0)
             
-            fig_cumulative = px.line(
-                x=daily_value.index,
-                y=daily_value.values,
-                title="Cumulative Revenue Over Time",
-                labels={'x': 'Date', 'y': 'Cumulative Value ($)'}
+            daily_revenue['Cumulative Total'] = daily_revenue['Total Value'].cumsum()
+            daily_revenue['Cumulative NR'] = daily_revenue['Nonrefundable Retainer'].cumsum()
+            daily_revenue['Cumulative R'] = daily_revenue['Refundable Retainer'].cumsum()
+            
+            fig_cumulative = go.Figure()
+            fig_cumulative.add_trace(go.Scatter(
+                x=daily_revenue.index,
+                y=daily_revenue['Cumulative Total'],
+                name='Total Revenue',
+                line=dict(color=COLORS['primary'], width=3)
+            ))
+            if 'Nonrefundable Retainer' in hired_df.columns:
+                fig_cumulative.add_trace(go.Scatter(
+                    x=daily_revenue.index,
+                    y=daily_revenue['Cumulative NR'],
+                    name='Nonrefundable',
+                    line=dict(color=COLORS['success'], width=2)
+                ))
+            if 'Refundable Retainer' in hired_df.columns:
+                fig_cumulative.add_trace(go.Scatter(
+                    x=daily_revenue.index,
+                    y=daily_revenue['Cumulative R'],
+                    name='Refundable',
+                    line=dict(color=COLORS['accent'], width=2)
+                ))
+            
+            fig_cumulative.update_layout(
+                title='Cumulative Revenue Over Time',
+                xaxis_title='Date',
+                yaxis_title='Cumulative Revenue ($)',
+                hovermode='x unified'
             )
-            fig_cumulative.update_traces(line_color=COLORS['accent'])
             st.plotly_chart(fig_cumulative, use_container_width=True)
-    
-    with col2:
-        # Value distribution
-        if len(hired_df) > 0:
-            fig_hist = px.histogram(
-                hired_df,
-                x='Value',
-                nbins=20,
-                title="Matter Value Distribution",
-                color_discrete_sequence=[COLORS['primary']]
-            )
-            fig_hist.update_layout(
-                xaxis_title="Matter Value ($)",
-                yaxis_title="Count"
-            )
-            st.plotly_chart(fig_hist, use_container_width=True)
-    
-    # Matter type vs average value
-    if 'Matter Type' in df.columns:
-        matter_value = hired_df.groupby('Matter Type')['Value'].agg(['sum', 'count', 'mean']).round(0)
-        matter_value.columns = ['Total Value', 'Count', 'Average Value']
-        matter_value = matter_value.sort_values('Total Value', ascending=False).head(10)
         
-        fig_matter_value = px.bar(
-            x=matter_value.index,
-            y=matter_value['Average Value'],
-            title="Top 10 Matter Types by Average Value",
-            color=matter_value['Average Value'],
-            color_continuous_scale='Viridis'
-        )
-        fig_matter_value.update_layout(
-            xaxis_title="Matter Type",
-            xaxis_tickangle=45,
-            showlegend=False
-        )
-        st.plotly_chart(fig_matter_value, use_container_width=True)
+        with col2:
+            # Revenue distribution by practice area
+            if 'Practice Area' in hired_df.columns:
+                practice_revenue = hired_df.groupby('Practice Area').agg({
+                    'Total Value': 'sum',
+                    'Nonrefundable Retainer': 'mean',
+                    'Refundable Retainer': 'mean'
+                }).round(0)
+                practice_revenue = practice_revenue.sort_values('Total Value', ascending=False).head(5)
+                
+                fig_practice = px.bar(
+                    practice_revenue.reset_index(),
+                    x='Practice Area',
+                    y='Total Value',
+                    title='Total Revenue by Practice Area',
+                    color='Total Value',
+                    color_continuous_scale='Viridis'
+                )
+                fig_practice.update_traces(
+                    hovertemplate="<b>%{x}</b><br>" +
+                                 "Total Revenue: $%{y:,.0f}<br>" +
+                                 "<extra></extra>"
+                )
+                fig_practice.update_layout(xaxis_tickangle=45)
+                st.plotly_chart(fig_practice, use_container_width=True)
+    
+    # Detailed financial metrics table
+    st.subheader("Financial Performance by Practice Area")
+    if 'Practice Area' in hired_df.columns:
+        financial_summary = hired_df.groupby('Practice Area').agg({
+            'Total Value': ['sum', 'mean', 'count'],
+            'Nonrefundable Retainer': ['sum', 'mean'],
+            'Refundable Retainer': ['sum', 'mean']
+        }).round(0)
         
-        st.subheader("Matter Type Financial Performance")
-        st.dataframe(matter_value, use_container_width=True)
+        financial_summary.columns = [
+            'Total Revenue', 'Avg Revenue', 'Cases',
+            'Total NR', 'Avg NR',
+            'Total R', 'Avg R'
+        ]
+        
+        financial_summary = financial_summary.sort_values('Total Revenue', ascending=False)
+        
+        # Format for display
+        display_financial = financial_summary.copy()
+        currency_cols = ['Total Revenue', 'Avg Revenue', 'Total NR', 'Avg NR', 'Total R', 'Avg R']
+        for col in currency_cols:
+            if col in display_financial.columns:
+                display_financial[col] = display_financial[col].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
+        
+        st.dataframe(display_financial, use_container_width=True)
+    
+    # Monthly revenue trends
+    if 'Month' in hired_df.columns and len(hired_df) > 0:
+        monthly_revenue = hired_df.groupby('Month').agg({
+            'Total Value': 'sum',
+            'Nonrefundable Retainer': 'sum', 
+            'Refundable Retainer': 'sum'
+        }).fillna(0)
+        
+        fig_monthly = px.bar(
+            monthly_revenue.reset_index(),
+            x=monthly_revenue.index.astype(str),
+            y=['Total Value', 'Nonrefundable Retainer', 'Refundable Retainer'],
+            title='Monthly Revenue by Retainer Type',
+            color_discrete_map={
+                'Total Value': COLORS['primary'],
+                'Nonrefundable Retainer': COLORS['success'],
+                'Refundable Retainer': COLORS['accent']
+            }
+        )
+        fig_monthly.update_layout(
+            xaxis_title='Month',
+            yaxis_title='Revenue ($)',
+            barmode='group'
+        )
+        st.plotly_chart(fig_monthly, use_container_width=True)
 
 def show_staff_performance_page(df: pd.DataFrame):
     """Display staff performance analysis."""
