@@ -1577,65 +1577,277 @@ def show_financial_dashboard_page(df: pd.DataFrame):
         st.plotly_chart(fig_monthly, use_container_width=True)
 
 def show_staff_performance_page(df: pd.DataFrame):
-    """Display staff performance analysis."""
-    st.header("👥 Staff Performance")
+    """Display comprehensive staff performance analysis with engagement analytics."""
+    st.header("👥 Staff Performance Analytics")
     
     if 'Created By' not in df.columns:
         st.warning("Staff data not available")
         return
     
-    # Staff performance metrics - calculate revenue properly for hired matters only
+    # Calculate comprehensive staff metrics
     staff_data = []
     for staff in df['Created By'].unique():
         staff_df = df[df['Created By'] == staff]
-        hired_df = staff_df[staff_df['Status'] == 'Hired'] if 'Status' in df.columns else staff_df
+        
+        # Basic counts
+        total_leads = len(staff_df)
+        scheduled = staff_df['Scheduled'].sum() if 'Scheduled' in staff_df.columns else 0
+        qualified = staff_df['Qualified Lead'].sum() if 'Qualified Lead' in staff_df.columns else 0
+        hired = len(staff_df[staff_df['Status'] == 'Hired']) if 'Status' in staff_df.columns else 0
+        
+        # Engagement metrics
+        scheduled_df = staff_df[staff_df['Scheduled'] == True] if 'Scheduled' in staff_df.columns else pd.DataFrame()
+        showed = len(scheduled_df[scheduled_df['No show'] == False]) if 'No show' in scheduled_df.columns and len(scheduled_df) > 0 else 0
+        no_show = scheduled - showed if scheduled > 0 else 0
+        
+        calls = staff_df['Call'].sum() if 'Call' in staff_df.columns else 0
+        zooms = staff_df['Zoom'].sum() if 'Zoom' in staff_df.columns else 0
+        
+        # Financial metrics
+        hired_df = staff_df[staff_df['Status'] == 'Hired'] if 'Status' in staff_df.columns else staff_df
+        revenue = hired_df['Total Value'].sum() if 'Total Value' in hired_df.columns else 0
+        
+        # Calculate rates
+        show_rate = (showed / scheduled * 100) if scheduled > 0 else 0
+        qualification_rate = (qualified / total_leads * 100) if total_leads > 0 else 0
+        conversion_rate = (hired / total_leads * 100) if total_leads > 0 else 0
         
         staff_metrics = {
-            'Created By': staff,
-            'Total Leads': len(staff_df),
-            'Hired': len(hired_df),
-            'Revenue Generated': hired_df['Total Value'].sum() if 'Total Value' in hired_df.columns else 0,
-            'Scheduled': staff_df['Scheduled'].sum() if 'Scheduled' in staff_df.columns else 0
+            'Staff': staff,
+            'Total Leads': total_leads,
+            'Scheduled': scheduled,
+            'Showed': showed,
+            'No Show': no_show,
+            'Qualified': qualified,
+            'Hired': hired,
+            'Calls': calls,
+            'Zooms': zooms,
+            'Revenue': revenue,
+            'Show Rate %': round(show_rate, 1),
+            'Qualification Rate %': round(qualification_rate, 1),
+            'Conversion Rate %': round(conversion_rate, 1),
+            'Revenue per Lead': round(revenue / total_leads, 0) if total_leads > 0 else 0,
+            'Revenue per Scheduled': round(revenue / scheduled, 0) if scheduled > 0 else 0,
+            'Revenue per Qualified': round(revenue / qualified, 0) if qualified > 0 else 0
         }
         staff_data.append(staff_metrics)
     
-    staff_performance = pd.DataFrame(staff_data).set_index('Created By')
+    staff_metrics_df = pd.DataFrame(staff_data)
     
-    # Calculate conversion rate
-    if 'Hired' in staff_performance.columns:
-        staff_performance['Conversion Rate %'] = (staff_performance['Hired'] / staff_performance['Total Leads'] * 100).round(1)
+    # Create 4 tabs for comprehensive analysis
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "📞 Engagement Metrics", "🔄 Conversion Funnel", "💰 Revenue Analysis"])
     
-    # Leaderboard
-    col1, col2 = st.columns(2)
+    with tab1:
+        st.subheader("Individual Staff Performance Cards")
+        
+        # Create performance cards for each staff member
+        cols = st.columns(min(3, len(staff_metrics_df)))
+        for idx, (_, staff) in enumerate(staff_metrics_df.iterrows()):
+            with cols[idx % 3]:
+                st.markdown(f"### {staff['Staff']}")
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("Total Leads", f"{staff['Total Leads']:,}")
+                    st.metric("Scheduled", f"{staff['Scheduled']:,}")
+                    st.metric("Qualified", f"{staff['Qualified']:,}")
+                with col_b:
+                    st.metric("Conversions", f"{staff['Hired']:,}")
+                    st.metric("Revenue", f"${staff['Revenue']:,.0f}")
+                    st.metric("Conv. Rate", f"{staff['Conversion Rate %']:.1f}%")
+                
+                # Show/No-show breakdown
+                if staff['Scheduled'] > 0:
+                    show_data = {'Type': ['Showed', 'No Show'], 'Count': [staff['Showed'], staff['No Show']]}
+                    fig_show = px.pie(show_data, values='Count', names='Type', 
+                                    title="Show Rate", height=200,
+                                    color_discrete_map={'Showed': COLORS['success'], 'No Show': COLORS['warning']})
+                    fig_show.update_traces(textinfo='percent+label')
+                    st.plotly_chart(fig_show, use_container_width=True)
+        
+        # Staff comparison chart
+        st.subheader("Staff Performance Comparison")
+        
+        progression_data = []
+        for _, staff in staff_metrics_df.iterrows():
+            progression_data.extend([
+                {'Staff': staff['Staff'], 'Stage': 'Total Leads', 'Count': staff['Total Leads']},
+                {'Staff': staff['Staff'], 'Stage': 'Scheduled', 'Count': staff['Scheduled']},
+                {'Staff': staff['Staff'], 'Stage': 'Showed', 'Count': staff['Showed']},
+                {'Staff': staff['Staff'], 'Stage': 'Qualified', 'Count': staff['Qualified']},
+                {'Staff': staff['Staff'], 'Stage': 'Hired', 'Count': staff['Hired']}
+            ])
+        
+        progression_df = pd.DataFrame(progression_data)
+        
+        fig_progression = px.bar(progression_df, x='Staff', y='Count', color='Stage',
+                               title="Lead Progression by Staff Member",
+                               color_discrete_sequence=px.colors.qualitative.Set2)
+        st.plotly_chart(fig_progression, use_container_width=True)
     
-    with col1:
-        st.subheader("🏆 Top Performers by Revenue")
-        top_revenue = staff_performance.nlargest(5, 'Revenue Generated')[['Revenue Generated', 'Total Leads']]
-        st.dataframe(top_revenue, use_container_width=True)
+    with tab2:
+        st.subheader("Engagement Performance Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Show vs No-Show analysis
+            show_data = []
+            for _, staff in staff_metrics_df.iterrows():
+                if staff['Scheduled'] > 0:
+                    show_data.extend([
+                        {'Staff': staff['Staff'], 'Type': 'Showed', 'Count': staff['Showed']},
+                        {'Staff': staff['Staff'], 'Type': 'No Show', 'Count': staff['No Show']}
+                    ])
+            
+            if show_data:
+                show_df = pd.DataFrame(show_data)
+                fig_show_comparison = px.bar(show_df, x='Staff', y='Count', color='Type',
+                                           title="Show vs No-Show by Staff",
+                                           color_discrete_map={'Showed': COLORS['success'], 'No Show': COLORS['warning']})
+                st.plotly_chart(fig_show_comparison, use_container_width=True)
+        
+        with col2:
+            # Communication channels comparison
+            comm_data = []
+            for _, staff in staff_metrics_df.iterrows():
+                if staff['Calls'] > 0 or staff['Zooms'] > 0:
+                    comm_data.extend([
+                        {'Staff': staff['Staff'], 'Channel': 'Calls', 'Count': staff['Calls']},
+                        {'Staff': staff['Staff'], 'Channel': 'Zooms', 'Count': staff['Zooms']}
+                    ])
+            
+            if comm_data:
+                comm_df = pd.DataFrame(comm_data)
+                fig_comm = px.bar(comm_df, x='Staff', y='Count', color='Channel',
+                                title="Communication Channels by Staff",
+                                color_discrete_map={'Calls': COLORS['primary'], 'Zooms': COLORS['accent']})
+                st.plotly_chart(fig_comm, use_container_width=True)
+        
+        # Qualification performance
+        qual_data = []
+        for _, staff in staff_metrics_df.iterrows():
+            total = staff['Total Leads']
+            qualified = staff['Qualified']
+            unqualified = total - qualified
+            qual_data.extend([
+                {'Staff': staff['Staff'], 'Type': 'Qualified', 'Count': qualified},
+                {'Staff': staff['Staff'], 'Type': 'Unqualified', 'Count': unqualified}
+            ])
+        
+        qual_df = pd.DataFrame(qual_data)
+        fig_qual = px.bar(qual_df, x='Staff', y='Count', color='Type',
+                        title="Qualification Performance by Staff",
+                        color_discrete_map={'Qualified': COLORS['success'], 'Unqualified': COLORS['secondary']})
+        st.plotly_chart(fig_qual, use_container_width=True)
+        
+        # Efficiency metrics table
+        st.subheader("Engagement Efficiency Metrics")
+        efficiency_df = staff_metrics_df[['Staff', 'Show Rate %', 'Qualification Rate %', 'Conversion Rate %']].copy()
+        
+        # Color code the efficiency table
+        def color_efficiency(val):
+            if val >= 75:
+                return 'background-color: #d4edda'
+            elif val >= 50:
+                return 'background-color: #fff3cd'
+            else:
+                return 'background-color: #f8d7da'
+        
+        styled_efficiency = efficiency_df.style.applymap(color_efficiency, subset=['Show Rate %', 'Qualification Rate %', 'Conversion Rate %'])
+        st.dataframe(styled_efficiency, use_container_width=True)
     
-    with col2:
-        if 'Conversion Rate %' in staff_performance.columns:
-            st.subheader("🎯 Top Performers by Conversion Rate")
-            top_conversion = staff_performance.nlargest(5, 'Conversion Rate %')[['Conversion Rate %', 'Total Leads']]
-            st.dataframe(top_conversion, use_container_width=True)
+    with tab3:
+        st.subheader("Individual Conversion Funnels")
+        
+        # Create individual funnels for each staff member
+        cols = st.columns(min(2, len(staff_metrics_df)))
+        for idx, (_, staff) in enumerate(staff_metrics_df.iterrows()):
+            with cols[idx % 2]:
+                # Create funnel data
+                funnel_values = [
+                    staff['Total Leads'],
+                    staff['Scheduled'],
+                    staff['Showed'],
+                    staff['Qualified'],
+                    staff['Hired']
+                ]
+                
+                funnel_labels = ['Total Leads', 'Scheduled', 'Showed', 'Qualified', 'Hired']
+                
+                fig_funnel = go.Figure(go.Funnel(
+                    y=funnel_labels,
+                    x=funnel_values,
+                    textinfo="value+percent initial"
+                ))
+                
+                fig_funnel.update_layout(
+                    title=f"Conversion Funnel: {staff['Staff']}",
+                    height=400
+                )
+                
+                st.plotly_chart(fig_funnel, use_container_width=True)
+                
+                # Add key metrics below funnel
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("Final Conversion Rate", f"{staff['Conversion Rate %']:.1f}%")
+                with col_b:
+                    st.metric("Revenue per Lead", f"${staff['Revenue per Lead']:,.0f}")
+                
+                if staff['Hired'] > 0:
+                    avg_deal = staff['Revenue'] / staff['Hired']
+                    st.metric("Average Deal Size", f"${avg_deal:,.0f}")
     
-    # Staff performance chart
-    if len(staff_performance) > 0:
-        fig_staff = px.scatter(
-            staff_performance.reset_index(),
-            x='Total Leads',
-            y='Revenue Generated',
-            size='Conversion Rate %' if 'Conversion Rate %' in staff_performance.columns else 'Revenue Generated',
-            hover_name='Created By',
-            title="Staff Performance: Leads vs Revenue",
-            color='Conversion Rate %' if 'Conversion Rate %' in staff_performance.columns else 'Revenue Generated',
-            color_continuous_scale='Viridis'
-        )
-        st.plotly_chart(fig_staff, use_container_width=True)
-    
-    # Full staff performance table
-    st.subheader("Complete Staff Performance")
-    st.dataframe(staff_performance.sort_values('Revenue Generated', ascending=False), use_container_width=True)
+    with tab4:
+        st.subheader("Revenue Performance Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Revenue leaderboard
+            st.subheader("🏆 Revenue Leaderboard")
+            revenue_ranking = staff_metrics_df.sort_values('Revenue', ascending=False)[['Staff', 'Revenue', 'Hired']].copy()
+            revenue_ranking['Rank'] = range(1, len(revenue_ranking) + 1)
+            revenue_ranking['Revenue'] = revenue_ranking['Revenue'].apply(lambda x: f"${x:,.0f}")
+            st.dataframe(revenue_ranking[['Rank', 'Staff', 'Revenue', 'Hired']], use_container_width=True)
+        
+        with col2:
+            # Revenue distribution pie chart
+            total_revenue = staff_metrics_df['Revenue'].sum()
+            if total_revenue > 0:
+                fig_revenue_pie = px.pie(staff_metrics_df, values='Revenue', names='Staff',
+                                       title="Revenue Distribution by Staff")
+                st.plotly_chart(fig_revenue_pie, use_container_width=True)
+        
+        # Performance matrix scatter plot
+        fig_matrix = px.scatter(staff_metrics_df, x='Total Leads', y='Revenue',
+                              size='Conversion Rate %', color='Staff',
+                              hover_data=['Scheduled', 'Qualified', 'Hired'],
+                              title="Performance Matrix: Leads vs Revenue",
+                              labels={'Total Leads': 'Total Leads', 'Revenue': 'Revenue ($)'})
+        st.plotly_chart(fig_matrix, use_container_width=True)
+        
+        # Efficiency metrics comparison
+        st.subheader("Efficiency Metrics Comparison")
+        efficiency_metrics = staff_metrics_df[['Staff', 'Revenue per Lead', 'Revenue per Scheduled', 'Revenue per Qualified']].copy()
+        
+        efficiency_melted = pd.melt(efficiency_metrics, id_vars=['Staff'], 
+                                  value_vars=['Revenue per Lead', 'Revenue per Scheduled', 'Revenue per Qualified'],
+                                  var_name='Metric', value_name='Revenue per Unit')
+        
+        fig_efficiency = px.bar(efficiency_melted, x='Staff', y='Revenue per Unit', color='Metric',
+                               title="Revenue Efficiency Metrics by Staff",
+                               barmode='group')
+        fig_efficiency.update_yaxis(title="Revenue per Unit ($)")
+        st.plotly_chart(fig_efficiency, use_container_width=True)
+        
+        # Complete performance summary table
+        st.subheader("Complete Staff Performance Summary")
+        summary_df = staff_metrics_df[['Staff', 'Total Leads', 'Conversion Rate %', 'Revenue', 'Revenue per Lead']].copy()
+        summary_df['Revenue'] = summary_df['Revenue'].apply(lambda x: f"${x:,.0f}")
+        summary_df['Revenue per Lead'] = summary_df['Revenue per Lead'].apply(lambda x: f"${x:,.0f}")
+        st.dataframe(summary_df.sort_values('Total Leads', ascending=False), use_container_width=True)
 
 def show_time_analysis_page(df: pd.DataFrame):
     """Display time-based analysis."""
