@@ -341,8 +341,8 @@ def validate_data_quality(df: pd.DataFrame) -> Dict[str, Any]:
             )
     
     # Check for negative values
-    if 'Value' in df.columns:
-        negative_values = df[df['Value'] < 0]['Value'].count()
+    if 'Total Value' in df.columns:
+        negative_values = df[df['Total Value'] < 0]['Total Value'].count()
         if negative_values > 0:
             quality_report['warnings'].append(
                 f"⚠️ Found {negative_values} records with negative values"
@@ -1167,9 +1167,9 @@ def show_lead_sources_page(df: pd.DataFrame):
     
     with col2:
         # ROI by source
-        if 'Value' in df.columns and 'Status' in df.columns:
+        if 'Total Value' in df.columns and 'Status' in df.columns:
             roi_by_source = df[df['Status'] == 'Hired'].groupby('Primary Contact Source').agg({
-                'Value': ['sum', 'count', 'mean']
+                'Total Value': ['sum', 'count', 'mean']
             }).round(0)
             roi_by_source.columns = ['Total Value', 'Count', 'Avg Value']
             roi_by_source = roi_by_source.sort_values('Total Value', ascending=False)
@@ -1223,7 +1223,7 @@ def show_lead_sources_page(df: pd.DataFrame):
             )
     
     with col2:
-        if st.button("💰 Export ROI Analysis") and 'Value' in df.columns:
+        if st.button("💰 Export ROI Analysis") and 'Total Value' in df.columns:
             csv_buffer = io.StringIO()
             roi_by_source.to_csv(csv_buffer)
             st.download_button(
@@ -1584,18 +1584,26 @@ def show_staff_performance_page(df: pd.DataFrame):
         st.warning("Staff data not available")
         return
     
-    # Staff performance metrics
-    staff_performance = df.groupby('Created By').agg({
-        'Status': ['count', lambda x: (x == 'Hired').sum()],
-        'Value': lambda x: x[df.loc[x.index, 'Status'] == 'Hired'].sum() if 'Status' in df.columns else x.sum(),
-        'Scheduled': 'sum' if 'Scheduled' in df.columns else lambda x: 0
-    }).round(0)
+    # Staff performance metrics - calculate revenue properly for hired matters only
+    staff_data = []
+    for staff in df['Created By'].unique():
+        staff_df = df[df['Created By'] == staff]
+        hired_df = staff_df[staff_df['Status'] == 'Hired'] if 'Status' in df.columns else staff_df
+        
+        staff_metrics = {
+            'Created By': staff,
+            'Total Leads': len(staff_df),
+            'Hired': len(hired_df),
+            'Revenue Generated': hired_df['Total Value'].sum() if 'Total Value' in hired_df.columns else 0,
+            'Scheduled': staff_df['Scheduled'].sum() if 'Scheduled' in staff_df.columns else 0
+        }
+        staff_data.append(staff_metrics)
     
-    if 'Status' in df.columns:
-        staff_performance.columns = ['Total Leads', 'Hired', 'Revenue Generated', 'Scheduled']
+    staff_performance = pd.DataFrame(staff_data).set_index('Created By')
+    
+    # Calculate conversion rate
+    if 'Hired' in staff_performance.columns:
         staff_performance['Conversion Rate %'] = (staff_performance['Hired'] / staff_performance['Total Leads'] * 100).round(1)
-    else:
-        staff_performance.columns = ['Total Leads', 'Revenue Generated', 'Scheduled']
     
     # Leaderboard
     col1, col2 = st.columns(2)
@@ -1677,7 +1685,7 @@ def show_time_analysis_page(df: pd.DataFrame):
     if 'Month' in df.columns:
         monthly_data = df.groupby('Month').agg({
             'Status': 'count',
-            'Value': lambda x: x[df.loc[x.index, 'Status'] == 'Hired'].sum() if 'Status' in df.columns else x.sum()
+            'Total Value': lambda x: x[df.loc[x.index, 'Status'] == 'Hired'].sum() if 'Status' in df.columns and 'Total Value' in df.columns else x.sum()
         }).round(0)
         monthly_data.columns = ['Lead Count', 'Revenue']
         
@@ -1704,7 +1712,7 @@ def show_time_analysis_page(df: pd.DataFrame):
     if 'Day_of_Week' in df.columns and 'Status' in df.columns:
         time_performance = df.groupby('Day_of_Week').agg({
             'Status': ['count', lambda x: (x == 'Hired').sum()],
-            'Value': lambda x: x[df.loc[x.index, 'Status'] == 'Hired'].sum()
+            'Total Value': 'sum'
         }).round(0)
         time_performance.columns = ['Total Leads', 'Hired', 'Revenue']
         time_performance['Conversion Rate %'] = (time_performance['Hired'] / time_performance['Total Leads'] * 100).round(1)
