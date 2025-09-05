@@ -173,146 +173,153 @@ def show_lead_input_page():
     # Initialize storage
     initialize_lead_storage()
     
-    # Create a beautiful form layout
-    with st.form("lead_input_form", clear_on_submit=True):
-        st.markdown("### 👤 Lead Information")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            # Intake staff selection
-            intake_name = st.selectbox(
-                "Intake Staff Name *",
-                options=INTAKE_STAFF,
-                help="Select the intake staff member"
-            )
-        
-        with col2:
-            # Matter type selection
-            matter_type = st.selectbox(
-                "Matter Type *",
-                options=MATTER_TYPES,
-                help="Select the type of legal matter"
-            )
-        
-        with col3:
-            # Lead source with search functionality
-            source_options = sorted(LEAD_SOURCES.keys())
-            lead_source = st.selectbox(
-                "Lead Source *",
-                options=source_options,
-                help="Select the source of this lead"
-            )
-        
-        # Conditional contact name field
-        contact_name = ""
-        if LEAD_SOURCES[lead_source]["has_contact"]:
-            contact_type = LEAD_SOURCES[lead_source]["contact_type"]
-            contact_name = st.text_input(
-                f"{contact_type} Name",
-                placeholder=f"Enter {contact_type.lower()} name",
-                help=f"Please provide the {contact_type.lower()} who referred this lead"
-            )
-        
-        st.markdown("### 📞 Contact Details")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            client_name = st.text_input(
-                "Client Name *",
-                placeholder="Enter client's full name"
-            )
-        
-        with col2:
-            client_email = st.text_input(
-                "Client Email",
-                placeholder="email@example.com"
-            )
-        
-        with col3:
-            client_phone = st.text_input(
-                "Client Phone",
-                placeholder="(xxx) xxx-xxxx"
-            )
-        
-        st.markdown("### 📊 Initial Outcome")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            initial_result = st.selectbox(
-                "Initial Result *",
-                options=["Scheduled", "Unqualified", "Follow Up Required", "No Response"],
-                help="What was the initial outcome of this lead?"
-            )
-        
-        # Conditional fields based on initial result
-        meeting_type = None
-        show_status = None
-        outcome = None
-        qualification_status = None
-        marketing_qualified = False
-        sales_qualified = False
-        unqualified_reason = None
-        
-        with col2:
-            if initial_result == "Scheduled":
-                meeting_type = st.selectbox(
-                    "Meeting Type",
-                    options=["Zoom", "Call"],
-                    help="How will the meeting be conducted?"
-                )
-                
-                st.info("💡 Sales team will update show status and outcome later")
-        
-        # Qualification section
-        if initial_result != "Unqualified":
-            st.markdown("### ✅ Qualification Status")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                is_qualified = st.checkbox("Lead is Qualified")
-                
-                if is_qualified:
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        marketing_qualified = st.checkbox("Marketing Qualified")
-                    with col_b:
-                        sales_qualified = st.checkbox("Sales Qualified")
-        else:
-            st.markdown("### ❌ Unqualified Reason")
-            unqualified_reason = st.selectbox(
-                "Reason for Disqualification",
-                options=UNQUALIFIED_REASONS
-            )
-        
-        # Notes section
-        st.markdown("### 📝 Additional Notes")
-        notes = st.text_area(
-            "Notes (Optional)",
-            placeholder="Add any additional information about this lead...",
-            height=100
+    # Initialize session state for dynamic fields
+    if 'lead_source' not in st.session_state:
+        st.session_state.lead_source = list(LEAD_SOURCES.keys())[0]
+    if 'initial_result' not in st.session_state:
+        st.session_state.initial_result = "Scheduled"
+    if 'show_qualified_options' not in st.session_state:
+        st.session_state.show_qualified_options = False
+    
+    st.markdown("### 👤 Lead Information")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        intake_name = st.selectbox(
+            "Intake Staff Name *",
+            options=INTAKE_STAFF,
+            help="Select the intake staff member",
+            key="intake_staff"
         )
-        
-        # Submit button
-        col1, col2, col3 = st.columns([2,1,2])
-        with col2:
-            submitted = st.form_submit_button(
-                "💾 Save Lead",
-                use_container_width=True,
-                type="primary"
+    
+    with col2:
+        matter_type = st.selectbox(
+            "Matter Type *",
+            options=MATTER_TYPES,
+            help="Select the type of legal matter",
+            key="matter_type"
+        )
+    
+    with col3:
+        lead_source = st.selectbox(
+            "Lead Source *",
+            options=sorted(LEAD_SOURCES.keys()),
+            help="Select the source of this lead",
+            key="lead_source"
+        )
+    
+    # Conditional contact name field (outside form)
+    contact_name = ""
+    if LEAD_SOURCES[lead_source]["has_contact"]:
+        contact_type = LEAD_SOURCES[lead_source]["contact_type"]
+        contact_name = st.text_input(
+            f"{contact_type} Name *",
+            placeholder=f"Enter {contact_type.lower()} name",
+            help=f"Please provide the {contact_type.lower()} who referred this lead",
+            key="contact_name"
+        )
+    
+    st.markdown("### 📞 Contact Details")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        client_name = st.text_input(
+            "Client Name *",
+            placeholder="Enter client's full name",
+            key="client_name"
+        )
+    
+    with col2:
+        client_email = st.text_input(
+            "Client Email",
+            placeholder="email@example.com",
+            key="client_email"
+        )
+    
+    with col3:
+        client_phone = st.text_input(
+            "Client Phone",
+            placeholder="(xxx) xxx-xxxx",
+            key="client_phone"
+        )
+    
+    st.markdown("### 📊 Initial Outcome")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        initial_result = st.selectbox(
+            "Initial Result *",
+            options=["Scheduled", "Unqualified", "Follow Up Required", "No Response"],
+            help="What was the initial outcome of this lead?",
+            key="initial_result"
+        )
+    
+    meeting_type = None
+    with col2:
+        if initial_result == "Scheduled":
+            meeting_type = st.selectbox(
+                "Meeting Type",
+                options=["Zoom", "Call"],
+                help="How will the meeting be conducted?",
+                key="meeting_type"
             )
+            
+            st.info("💡 Sales team will update show status and outcome later")
+    
+    # Qualification section
+    marketing_qualified = False
+    sales_qualified = False
+    unqualified_reason = None
+    
+    if initial_result == "Unqualified":
+        st.markdown("### ❌ Unqualified Reason")
+        unqualified_reason = st.selectbox(
+            "Reason for Disqualification",
+            options=UNQUALIFIED_REASONS,
+            key="unqualified_reason"
+        )
+    else:
+        st.markdown("### ✅ Qualification Status")
         
-        if submitted:
+        is_qualified = st.checkbox("Lead is Qualified", key="is_qualified")
+        
+        if is_qualified:
+            col1, col2 = st.columns(2)
+            with col1:
+                marketing_qualified = st.checkbox("Marketing Qualified", key="marketing_qualified")
+            with col2:
+                sales_qualified = st.checkbox("Sales Qualified", key="sales_qualified")
+    
+    # Notes section
+    st.markdown("### 📝 Additional Notes")
+    notes = st.text_area(
+        "Notes (Optional)",
+        placeholder="Add any additional information about this lead...",
+        height=100,
+        key="notes"
+    )
+    
+    # Submit button
+    col1, col2, col3 = st.columns([2,1,2])
+    with col2:
+        if st.button("💾 Save Lead", use_container_width=True, type="primary"):
             # Validation
+            errors = []
+            
             if not client_name:
-                st.error("Please enter the client's name")
-            elif LEAD_SOURCES[lead_source]["has_contact"] and not contact_name:
-                st.error(f"Please enter the {LEAD_SOURCES[lead_source]['contact_type']} name")
+                errors.append("Please enter the client's name")
+            
+            if LEAD_SOURCES[lead_source]["has_contact"] and not contact_name:
+                errors.append(f"Please enter the {LEAD_SOURCES[lead_source]['contact_type']} name")
+            
+            if errors:
+                for error in errors:
+                    st.error(error)
             else:
-                # Create lead data - matching your dashboard column names
+                # Create lead data
                 lead_data = {
                     'Lead_ID': str(uuid.uuid4()),
                     'Created': datetime.now(),
@@ -320,13 +327,13 @@ def show_lead_input_page():
                     'Matter Type': matter_type,
                     'Primary Contact Source': lead_source,
                     'Contact_Name': contact_name,
-                    'Primary Contact': client_name,  # Main client name
+                    'Primary Contact': client_name,
                     'Primary Contact Email': client_email,
                     'Primary Contact Phone': client_phone,
                     'Initial_Result': initial_result,
                     'Meeting_Type': meeting_type,
-                    'Show_Status': None,  # To be updated by sales
-                    'Outcome': None,  # To be updated by sales
+                    'Show_Status': None,
+                    'Outcome': None,
                     'Qualification_Status': 'Qualified' if (marketing_qualified or sales_qualified) else ('Unqualified' if initial_result == 'Unqualified' else 'Pending'),
                     'Marketing_Qualified': marketing_qualified,
                     'Sales_Qualified': sales_qualified,
@@ -339,11 +346,10 @@ def show_lead_input_page():
                     'Total Value': 0,
                     'Follow_Up_Date': None,
                     'Notes': notes,
-                    # Additional columns for dashboard compatibility
                     'Scheduled': True if initial_result == 'Scheduled' else False,
                     'Call': True if meeting_type == 'Call' else False,
                     'Zoom': True if meeting_type == 'Zoom' else False,
-                    'No show': False,  # Will be updated by sales team
+                    'No show': False,
                     'Qualified Lead': True if (marketing_qualified or sales_qualified) else False
                 }
                 
@@ -351,6 +357,15 @@ def show_lead_input_page():
                 if save_lead(lead_data):
                     st.success(f"✅ Lead successfully saved! Lead ID: {lead_data['Lead_ID'][:8]}...")
                     st.balloons()
+                    
+                    # Clear form by resetting session state
+                    for key in ['client_name', 'client_email', 'client_phone', 'notes', 
+                               'contact_name', 'is_qualified', 'marketing_qualified', 
+                               'sales_qualified']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    
+                    st.rerun()
                 else:
                     st.error("Failed to save lead. Please try again.")
 
