@@ -167,6 +167,9 @@ def update_lead(lead_id, updates):
 
 def show_lead_input_page():
     """Display the lead input form page."""
+    # Apply custom CSS for better input field visibility
+    st.markdown(LEAD_INPUT_CSS, unsafe_allow_html=True)
+    
     st.header("➕ New Lead Input")
     st.markdown("---")
     
@@ -371,6 +374,9 @@ def show_lead_input_page():
 
 def show_lead_update_page():
     """Display the lead update page for sales team."""
+    # Apply custom CSS for better input field visibility
+    st.markdown(LEAD_INPUT_CSS, unsafe_allow_html=True)
+    
     st.header("🔄 Update Lead Status")
     st.markdown("---")
     
@@ -549,6 +555,9 @@ def show_lead_update_page():
 
 def show_lead_management_dashboard():
     """Display comprehensive lead management dashboard."""
+    # Apply custom CSS for better input field visibility
+    st.markdown(LEAD_INPUT_CSS, unsafe_allow_html=True)
+    
     st.header("📊 Lead Management Dashboard")
     st.markdown("---")
     
@@ -794,12 +803,13 @@ LEAD_INPUT_CSS = """
     
     /* Input field styling */
     .stTextInput > div > div > input {
-        background-color: white;
-        border: 2px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 0.75rem;
-        font-size: 1rem;
-        transition: all 0.3s;
+        background-color: white !important;
+        border: 2px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        padding: 0.75rem !important;
+        font-size: 1rem !important;
+        color: #1f2937 !important;
+        transition: all 0.3s !important;
     }
     
     .stTextInput > div > div > input:focus {
@@ -808,13 +818,31 @@ LEAD_INPUT_CSS = """
     }
     
     /* Select box styling */
-    .stSelectbox > div > div > select {
-        background-color: white;
-        border: 2px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 0.75rem;
-        font-size: 1rem;
-        cursor: pointer;
+    .stSelectbox > div > div > div {
+        background-color: white !important;
+        border: 2px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        color: #1f2937 !important;
+    }
+    
+    .stSelectbox > div > div > div > div {
+        color: #1f2937 !important;
+    }
+    
+    /* Text area styling */
+    .stTextArea > div > div > textarea {
+        background-color: white !important;
+        border: 2px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        padding: 0.75rem !important;
+        font-size: 1rem !important;
+        color: #1f2937 !important;
+        transition: all 0.3s !important;
+    }
+    
+    .stTextArea > div > div > textarea:focus {
+        border-color: #667eea !important;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
     }
     
     /* Button styling */
