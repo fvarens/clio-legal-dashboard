@@ -18,6 +18,15 @@ import io
 from typing import Optional, Dict, Any, Tuple
 import re
 
+# Import lead input system
+from lead_input_system import (
+    show_lead_input_page,
+    show_lead_update_page, 
+    show_lead_management_dashboard,
+    load_manual_leads,
+    LEAD_INPUT_CSS
+)
+
 # Page configuration
 st.set_page_config(
     page_title="CLIO Legal Matters Dashboard",
@@ -924,7 +933,10 @@ def main():
         "Geographic Analysis",
         "Financial Dashboard",
         "Staff Performance",
-        "Time Analysis"
+        "Time Analysis",
+        "➕ Lead Input",
+        "🔄 Update Leads",
+        "📊 Lead Management"
     ]
     
     selected_page = st.sidebar.selectbox("Select Dashboard Page", pages)
@@ -946,6 +958,12 @@ def main():
         show_staff_performance_page(filtered_df)
     elif selected_page == "Time Analysis":
         show_time_analysis_page(filtered_df)
+    elif selected_page == "➕ Lead Input":
+        show_lead_input_page()
+    elif selected_page == "🔄 Update Leads":
+        show_lead_update_page()
+    elif selected_page == "📊 Lead Management":
+        show_lead_management_dashboard()
 
 def show_overview_page(df: pd.DataFrame):
     """Display the overview page with KPIs and status breakdown."""
