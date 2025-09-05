@@ -2,9 +2,10 @@
 CLIO Legal Matters Data Analysis Dashboard
 
 A comprehensive Streamlit dashboard for analyzing legal matters data with 
-conversion tracking, lead source analytics, geographic analysis, and more.
+conversion tracking, lead source analytics, geographic analysis, and lead management system.
 
 Author: Claude Code
+Version: 2.0 - Now with Lead Management System
 """
 
 import streamlit as st
